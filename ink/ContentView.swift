@@ -6,54 +6,32 @@
 //
 
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
-
+    private var collectedDocuments: [String] = [] // TODO: this isnt supposed to be a string
+    
+    private var userName: String = "lebron"
+    
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        } detail: {
-            Text("Select an item")
-        }
+        Home()
     }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
+    
+    @ViewBuilder
+    private func Home() -> some View {
+//        VStack() {
+//            HStack() {
+//                Text("Welcome back \(userName.capitalized)")
+//                    .font(.system(size: 24))
+//            }
+//        }
+//        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        DrawingView()
     }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
-        }
-    }
+    
 }
+
+// BUG i think when pen only is false it still acts as true, fix this soon pls
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
 }

@@ -140,6 +140,7 @@ private enum Metrics {
 struct ToolPalette: View {
     @Bindable var state: ToolState
     @Binding var penOnly: Bool
+    @Binding var scribbleErase: Bool
     var isDrawing: Bool
     var canUndo: Bool
     var canRedo: Bool
@@ -330,6 +331,7 @@ struct ToolPalette: View {
         .popover(isPresented: $showingMore) {
             VStack(alignment: .leading, spacing: 12) {
                 Toggle("Stylus only", isOn: $penOnly)
+                Toggle("Scribble to erase", isOn: $scribbleErase)
                 Divider()
                 Button("Clear canvas", systemImage: "trash", role: .destructive) {
                     showingMore = false

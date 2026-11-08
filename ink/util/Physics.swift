@@ -76,12 +76,12 @@ final class OrbPhysics {
     func release(velocity: CGVector) {
         dragStart = nil
 
-        // Limit the throw speed.
+        // Limit the throw speed
         let s = hypot(velocity.dx, velocity.dy)
         let scale = s > maxSpeed ? maxSpeed / s : 1
         self.velocity = CGVector(dx: velocity.dx * scale, dy: velocity.dy * scale)
 
-        // Pick the magnet the throw is heading toward, right now.
+        // Pick the magnet the throw is heading toward, right now
         let aimed = CGPoint(x: position.x + self.velocity.dx * lookAhead,
                             y: position.y + self.velocity.dy * lookAhead)
         target = nearestAnchor(to: aimed)

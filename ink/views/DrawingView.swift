@@ -20,6 +20,7 @@ struct Stroke {
 
 struct DrawingView: View {
     @AppStorage("penOnly") private var penOnly = true
+    @AppStorage("scribbleErase") private var scribbleErase = true
 
     @State private var strokes: [Stroke] = []
     @State private var currentStroke: Stroke? = nil
@@ -132,6 +133,22 @@ struct DrawingView: View {
         if changed { strokes = result }
     }
 
+    private func deleteStrokes(coveredBy scribble: Stroke) -> Bool {
+        let box = Scribble.bounds(scribble.points.map(\.location))
+            .insetBy(dx: -12 / zoom, dy: -12 / zoom)
+
+        let remaining = strokes.filter { s in
+            guard !s.points.isEmpty else { return true }
+            let inside = s.points.filter { box.contains($0.location) }.count
+            return Double(inside) / Double(s.points.count) < 0.6
+        }
+        guard remaining.count != strokes.count else { return false }
+
+        commit(strokes)
+        strokes = remaining
+        return true
+    }
+
     var body: some View {
         Canvas { context, size in
             context.translateBy(x: offset.width, y: offset.height)
@@ -183,8 +200,17 @@ struct DrawingView: View {
                         }
                         eraseSnapshot = nil
                     } else if let finished = currentStroke {
-                        commit(strokes)
-                        strokes.append(finished)
+                        let screenPoints = finished.points.map {
+                            CGPoint(x: $0.location.x * zoom, y: $0.location.y * zoom)
+                        }
+                        let canScribble = tools.selected == .pen || tools.selected == .pencil
+                        if scribbleErase, canScribble,
+                           Scribble.isScribble(screenPoints),
+                           deleteStrokes(coveredBy: finished) {
+                        } else {
+                            commit(strokes)
+                            strokes.append(finished)
+                        }
                     }
                     currentStroke = nil
                 },
@@ -200,6 +226,7 @@ struct DrawingView: View {
             ToolPalette(
                 state: tools,
                 penOnly: $penOnly,
+                scribbleErase: $scribbleErase,
                 isDrawing: isDrawing,
                 canUndo: !undoStack.isEmpty,
                 canRedo: !redoStack.isEmpty,

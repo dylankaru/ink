@@ -14,6 +14,7 @@ struct StrokePoint {
 
 struct Stroke {
     var points: [StrokePoint] = []
+    var tool: Tool = .pen
     var colour: Color = .black
     var width: CGFloat = 8
 }
@@ -133,6 +134,62 @@ struct DrawingView: View {
         if changed { strokes = result }
     }
 
+    private func drawMarker(_ stroke: Stroke, in context: GraphicsContext) {
+        guard let first = stroke.points.first else { return }
+        var path = Path()
+        path.move(to: first.location)
+        if stroke.points.count == 1 {
+            path.addLine(to: first.location)
+        } else {
+            for point in stroke.points.dropFirst() { path.addLine(to: point.location) }
+        }
+
+        var layer = context
+        layer.blendMode = .multiply
+        layer.stroke(
+            path,
+            with: .color(stroke.colour.opacity(0.4)),
+            style: StrokeStyle(lineWidth: stroke.width, lineCap: .round, lineJoin: .round)
+        )
+    }
+
+    private func drawPencil(_ stroke: Stroke, in context: GraphicsContext) {
+        var light = Path()
+        var dark = Path()
+
+        for (a, b) in zip(stroke.points, stroke.points.dropFirst()) {
+            let pressure = (a.pressure + b.pressure) / 2
+            let w = stroke.width * (0.2 + 0.8 * pressure)
+            let dx = b.location.x - a.location.x
+            let dy = b.location.y - a.location.y
+            let len = hypot(dx, dy)
+            let nx = len > 0 ? -dy / len : 0
+            let ny = len > 0 ? dx / len : 0
+            let count = min(Int(len * w * 0.9) + 1, 40)
+
+            let seedX = UInt64(bitPattern: Int64((a.location.x * 64).rounded()))
+            let seedY = UInt64(bitPattern: Int64((a.location.y * 64).rounded()))
+            var rng = SeededGenerator(seed: seedX &* 31 &+ seedY)
+
+            for _ in 0..<count {
+                let t = rng.unit()
+                let off = (rng.unit() - 0.5) * w
+                let r = (0.35 + 0.45 * rng.unit()) * (1 + w * 0.08)
+                let cx = a.location.x + dx * t + nx * off
+                let cy = a.location.y + dy * t + ny * off
+                let dot = Path(ellipseIn: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2))
+                if rng.unit() < 0.35 + 0.4 * pressure {
+                    dark.addPath(dot)
+                } else {
+                    light.addPath(dot)
+                }
+            }
+        }
+
+        context.fill(light, with: .color(stroke.colour.opacity(0.35)))
+        context.fill(dark, with: .color(stroke.colour.opacity(0.8)))
+    }
+
     private func deleteStrokes(coveredBy scribble: Stroke) -> Bool {
         let box = Scribble.bounds(scribble.points.map(\.location))
             .insetBy(dx: -12 / zoom, dy: -12 / zoom)
@@ -155,18 +212,25 @@ struct DrawingView: View {
             context.scaleBy(x: zoom, y: zoom)
 
             for stroke in strokes + [currentStroke].compactMap({ $0 }) {
-                for (a, b) in zip(stroke.points, stroke.points.dropFirst()) {
-                    var segment = Path()
-                    segment.move(to: a.location)
-                    segment.addLine(to: b.location)
+                switch stroke.tool {
+                case .marker:
+                    drawMarker(stroke, in: context)
+                case .pencil:
+                    drawPencil(stroke, in: context)
+                default:
+                    for (a, b) in zip(stroke.points, stroke.points.dropFirst()) {
+                        var segment = Path()
+                        segment.move(to: a.location)
+                        segment.addLine(to: b.location)
 
-                    let pressure = (a.pressure + b.pressure) / 2
-                    context.stroke(
-                        segment,
-                        with: .color(stroke.colour),
-                        style: StrokeStyle(lineWidth: stroke.width * (0.2 + 0.8 * pressure),
-                                           lineCap: .round)
-                    )
+                        let pressure = (a.pressure + b.pressure) / 2
+                        context.stroke(
+                            segment,
+                            with: .color(stroke.colour),
+                            style: StrokeStyle(lineWidth: stroke.width * (0.2 + 0.8 * pressure),
+                                               lineCap: .round)
+                        )
+                    }
                 }
             }
         }
@@ -181,7 +245,7 @@ struct DrawingView: View {
                         eraseSnapshot = strokes
                         erase(at: p)
                     } else {
-                        currentStroke = Stroke(colour: tools.current.colour, width: tools.current.width)
+                        currentStroke = Stroke(tool: tools.selected, colour: tools.current.colour, width: tools.current.width)
                         currentStroke?.points.append(StrokePoint(location: toWorld(p), pressure: pressure))
                     }
                 },
@@ -246,6 +310,21 @@ struct DrawingView: View {
             .opacity(0)
             .allowsHitTesting(false)
         }
+    }
+}
+
+private struct SeededGenerator {
+    var state: UInt64
+
+    init(seed: UInt64) { state = seed }
+
+    mutating func unit() -> CGFloat {
+        state &+= 0x9E3779B97F4A7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+        z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+        z ^= z >> 31
+        return CGFloat(z >> 11) / CGFloat(1 << 53)
     }
 }
 

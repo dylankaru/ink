@@ -7,16 +7,18 @@
 
 import SwiftUI
 
+// The tool that users interact with to customise/edit drawings
 enum Tool: String, CaseIterable, Identifiable {
-    case pen, marker, pencil, eraser
+    case pen, highlighter, pencil, eraser, laser
     var id: String { rawValue }
 
     var symbol: String {
         switch self {
         case .pen: "pencil.tip"
-        case .marker: "highlighter"
+        case .highlighter: "highlighter"
         case .pencil: "pencil"
         case .eraser: "eraser"
+        case .laser: "laser.burst"
         }
     }
 
@@ -25,18 +27,20 @@ enum Tool: String, CaseIterable, Identifiable {
     var widthRange: ClosedRange<CGFloat> {
         switch self {
         case .pen: 1...20
-        case .marker: 6...40
+        case .highlighter: 6...40
         case .pencil: 1...10
         case .eraser: 8...60
+        case .laser: 1...16
         }
     }
 
     var presets: [Color] {
         switch self {
         case .pen: [.black, .blue, .red, .green, .purple]
-        case .marker: [.yellow, .pink, .green, .orange, .cyan]
+        case .highlighter: [.yellow, .pink, .green, .orange, .cyan]
         case .pencil: [.gray, .black, .brown, .blue, .red]
         case .eraser: []
+        case .laser: [.red, .green]
         }
     }
 }
@@ -54,10 +58,11 @@ final class ToolState {
     var previous: Tool = .pen
     var recents: [Color] = []
     var settings: [Tool: ToolSettings] = [
-        .pen:    ToolSettings(colour: .black,  width: 6),
-        .marker: ToolSettings(colour: .yellow, width: 18),
+        .pen: ToolSettings(colour: .black,  width: 6),
+        .highlighter: ToolSettings(colour: .yellow, width: 18),
         .pencil: ToolSettings(colour: .gray,   width: 3),
-        .eraser: ToolSettings(colour: .white,  width: 24)
+        .eraser: ToolSettings(colour: .white,  width: 24),
+        .laser: ToolSettings(colour: .red,     width: 6)
     ]
 
     var current: ToolSettings { settings[selected]! }

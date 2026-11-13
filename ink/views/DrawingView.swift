@@ -19,6 +19,14 @@ struct Stroke {
     var width: CGFloat = 8
 }
 
+struct LaserStroke: Identifiable {
+    let id = UUID()
+    var points: [CGPoint] // world coordinates
+    var colour: Color
+    var width: CGFloat
+    var endedAt: Date? = nil
+}
+
 struct DrawingView: View {
     @AppStorage("penOnly") private var penOnly = true
     @AppStorage("scribbleErase") private var scribbleErase = true
@@ -32,7 +40,15 @@ struct DrawingView: View {
     @State private var offset: CGSize = .zero
     @State private var tools = ToolState()
 
-    private var isDrawing: Bool { currentStroke != nil || eraseSnapshot != nil }
+    @State private var laserStrokes: [LaserStroke] = []
+    @State private var activeLaserID: UUID? = nil
+
+    private let laserHold: TimeInterval = 2.0   // seconds visible after you lift
+    private let laserFade: TimeInterval = 0.8   // fade-out duration
+
+    private var isDrawing: Bool {
+        currentStroke != nil || eraseSnapshot != nil || activeLaserID != nil
+    }
 
     private func toWorld(_ p: CGPoint) -> CGPoint {
         CGPoint(x: (p.x - offset.width) / zoom,
@@ -206,31 +222,101 @@ struct DrawingView: View {
         return true
     }
 
+    // MARK: - Laser
+
+    private func laserAlpha(_ s: LaserStroke, at date: Date) -> Double {
+        guard let ended = s.endedAt else { return 1 }
+        let t = date.timeIntervalSince(ended) - laserHold
+        return t <= 0 ? 1 : max(0, 1 - t / laserFade)
+    }
+
+    private func drawLaser(_ s: LaserStroke, alpha: Double, in context: GraphicsContext) {
+        guard let first = s.points.first else { return }
+        var ctx = context
+
+        var path = Path()
+        if s.points.count == 1 {
+            path.move(to: first)
+            path.addLine(to: first)          // round cap makes a dot
+        } else {
+            path.move(to: first)
+            for i in 1..<s.points.count {
+                let prev = s.points[i - 1], cur = s.points[i]
+                path.addQuadCurve(to: CGPoint(x: (prev.x + cur.x) / 2, y: (prev.y + cur.y) / 2),
+                                  control: prev)
+            }
+            if let last = s.points.last { path.addLine(to: last) }
+        }
+
+        func style(_ w: CGFloat) -> StrokeStyle {
+            StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round)
+        }
+        ctx.stroke(path, with: .color(s.colour.opacity(0.25 * alpha)), style: style(s.width * 2.6)) // glow
+        ctx.stroke(path, with: .color(s.colour.opacity(alpha)),        style: style(s.width))       // body
+        ctx.stroke(path, with: .color(.white.opacity(0.7 * alpha)),    style: style(max(s.width * 0.3, 1))) // core
+    }
+
+    private func startLaser(at screenPoint: CGPoint) {
+        let s = LaserStroke(points: [toWorld(screenPoint)],
+                            colour: tools.current.colour,
+                            width: tools.current.width)
+        activeLaserID = s.id
+        laserStrokes.append(s)
+    }
+
+    private func extendLaser(to screenPoint: CGPoint) {
+        guard let id = activeLaserID,
+              let i = laserStrokes.firstIndex(where: { $0.id == id }) else { return }
+        laserStrokes[i].points.append(toWorld(screenPoint))
+    }
+
+    private func endLaser() {
+        guard let id = activeLaserID else { return }
+        activeLaserID = nil
+        if let i = laserStrokes.firstIndex(where: { $0.id == id }) {
+            laserStrokes[i].endedAt = .now
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(laserHold + laserFade + 0.1))
+            laserStrokes.removeAll { $0.id == id }
+        }
+    }
+
+    // MARK: - Body
+
     var body: some View {
-        Canvas { context, size in
-            context.translateBy(x: offset.width, y: offset.height)
-            context.scaleBy(x: zoom, y: zoom)
+        TimelineView(.animation(paused: laserStrokes.isEmpty)) { timeline in
+            Canvas { context, size in
+                context.translateBy(x: offset.width, y: offset.height)
+                context.scaleBy(x: zoom, y: zoom)
 
-            for stroke in strokes + [currentStroke].compactMap({ $0 }) {
-                switch stroke.tool {
-                case .marker:
-                    drawMarker(stroke, in: context)
-                case .pencil:
-                    drawPencil(stroke, in: context)
-                default:
-                    for (a, b) in zip(stroke.points, stroke.points.dropFirst()) {
-                        var segment = Path()
-                        segment.move(to: a.location)
-                        segment.addLine(to: b.location)
+                for stroke in strokes + [currentStroke].compactMap({ $0 }) {
+                    switch stroke.tool {
+                    case .highlighter:
+                        drawMarker(stroke, in: context)
+                    case .pencil:
+                        drawPencil(stroke, in: context)
+                    default:
+                        for (a, b) in zip(stroke.points, stroke.points.dropFirst()) {
+                            var segment = Path()
+                            segment.move(to: a.location)
+                            segment.addLine(to: b.location)
 
-                        let pressure = (a.pressure + b.pressure) / 2
-                        context.stroke(
-                            segment,
-                            with: .color(stroke.colour),
-                            style: StrokeStyle(lineWidth: stroke.width * (0.2 + 0.8 * pressure),
-                                               lineCap: .round)
-                        )
+                            let pressure = (a.pressure + b.pressure) / 2
+                            context.stroke(
+                                segment,
+                                with: .color(stroke.colour),
+                                style: StrokeStyle(lineWidth: stroke.width * (0.2 + 0.8 * pressure),
+                                                   lineCap: .round)
+                            )
+                        }
                     }
+                }
+
+                // Laser strokes sit on top of everything
+                for laser in laserStrokes {
+                    let alpha = laserAlpha(laser, at: timeline.date)
+                    if alpha > 0 { drawLaser(laser, alpha: alpha, in: context) }
                 }
             }
         }
@@ -241,7 +327,9 @@ struct DrawingView: View {
                     if tools.isExpanded {
                         withAnimation(.smooth(duration: 0.35)) { tools.collapse() }
                     }
-                    if tools.selected == .eraser {
+                    if tools.selected == .laser {
+                        startLaser(at: p)
+                    } else if tools.selected == .eraser {
                         eraseSnapshot = strokes
                         erase(at: p)
                     } else {
@@ -250,7 +338,9 @@ struct DrawingView: View {
                     }
                 },
                 onPenMove: { p, pressure in
-                    if tools.selected == .eraser {
+                    if tools.selected == .laser {
+                        extendLaser(to: p)
+                    } else if tools.selected == .eraser {
                         erase(at: p)
                     } else {
                         currentStroke?.points.append(
@@ -258,6 +348,10 @@ struct DrawingView: View {
                     }
                 },
                 onPenUp: {
+                    if activeLaserID != nil {
+                        endLaser()
+                        return
+                    }
                     if let snapshot = eraseSnapshot {
                         if snapshot.count != strokes.count || !snapshot.elementsEqualCount(strokes) {
                             commit(snapshot)

@@ -14,11 +14,16 @@ final class OrbPhysics {
     var dockCount = 0
 
     // Tuning
-    @ObservationIgnored private let stiffness: CGFloat = 140 // magnet strength
-    @ObservationIgnored private let dampingRatio: CGFloat = 0.7 // overshoot reduction ratio
+    // TODO: make presets for users to pick their own
+    @ObservationIgnored private let stiffness: CGFloat = 120 // magnet strength
+    @ObservationIgnored private let dampingRatio: CGFloat = 0.3 // overshoot reduction ratio
     @ObservationIgnored private let lookAhead: CGFloat = 0.25 // time to wait before locking on
     @ObservationIgnored private let maxSpeed: CGFloat = 3000 // max velocity can travel
-    @ObservationIgnored private let restitution: CGFloat = 0.2 // wall bounciness
+    @ObservationIgnored private let restitution: CGFloat = 0.125 // wall bounciness
+    
+    // for the presets, 120/0.325/0.25/3000/0.2 is quite bouncy
+    //
+    // 3000 should be constant
 
     private enum Phase { case idle, flying }
 

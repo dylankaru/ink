@@ -170,16 +170,24 @@ struct ToolPalette: View {
             let slots = rowPositions(origin: o, layout: layout, dir: dir)
             let rect = pillRect(origin: o, layout: layout, dir: dir, expanded: state.isExpanded)
 
-            GlassEffectContainer(spacing: Metrics.blend) {
-                ZStack(alignment: .topLeading) {
-                    pill(rect: rect, orbOrigin: o, slots: slots, layout: layout, dir: dir, size: size)
+            ZStack(alignment: .topLeading) {
+                // Glass only: capsule + settings panel, morphing together in the container
+                GlassEffectContainer(spacing: Metrics.blend) {
+                    ZStack(alignment: .topLeading) {
+                        glassCapsule(rect: rect)
 
-                    if panelMounted {
-                        panel(origin: o, layout: layout, size: size, slots: slots)
+                        if panelMounted {
+                            panel(origin: o, layout: layout, size: size, slots: slots)
+                        }
                     }
+                    .frame(width: size.width, height: size.height, alignment: .topLeading)
                 }
-                .frame(width: size.width, height: size.height, alignment: .topLeading)
+
+                // Icons: plain views at fixed screen positions, above the glass.
+                // They never depend on the animating glass rect, so they can't slide around.
+                pillContent(rect: rect, orbOrigin: o, slots: slots, layout: layout, dir: dir, size: size)
             }
+            .frame(width: size.width, height: size.height, alignment: .topLeading)
             .onChange(of: size, initial: true) { _, new in
                 physics.configure(size: new, orbSize: Metrics.orb, margin: Metrics.margin)
             }
@@ -210,54 +218,66 @@ struct ToolPalette: View {
         .sensoryFeedback(.impact(weight: .light), trigger: physics.dockCount)
     }
 
-    private func pill(rect: CGRect, orbOrigin o: CGPoint, slots: [Slot: CGPoint],
-                      layout: Layout, dir: CGFloat, size: CGSize) -> some View {
+    // MARK: - Pill
+
+    private func glassCapsule(rect: CGRect) -> some View {
+        let expanded = state.isExpanded
+        return Color.clear
+            .frame(width: rect.width, height: rect.height)
+            .glassEffect(
+                .regular.tint(state.selected == .eraser ? nil : state.colour.opacity(expanded ? 0.08 : 0.2)),
+                in: .capsule
+            )
+            .offset(x: rect.minX, y: rect.minY)
+    }
+
+    private func pillContent(rect: CGRect, orbOrigin o: CGPoint, slots: [Slot: CGPoint],
+                             layout: Layout, dir: CGFloat, size: CGSize) -> some View {
         let expanded = state.isExpanded
         let arrangement = arrangement(layout: layout, dir: dir)
 
-        func local(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x - rect.minX, y: p.y - rect.minY) }
-
         func delay(_ slot: Slot) -> Double {
             let rank = (arrangement.before.firstIndex(of: slot) ?? arrangement.after.firstIndex(of: slot) ?? 0) + 1
-            return 0.1 + 0.05 * Double(rank)
+            return 0.04 + 0.04 * Double(rank)
         }
 
         return ZStack(alignment: .topLeading) {
             iconButton("arrow.uturn.backward", enabled: canUndo, action: onUndo)
                 .revealed(expanded, delay: delay(.undo))
                 .allowsHitTesting(expanded)
-                .offset(local(slots[.undo] ?? .zero))
+                .offset(slots[.undo] ?? .zero)
 
             iconButton("arrow.uturn.forward", enabled: canRedo, action: onRedo)
                 .revealed(expanded, delay: delay(.redo))
                 .allowsHitTesting(expanded)
-                .offset(local(slots[.redo] ?? .zero))
+                .offset(slots[.redo] ?? .zero)
 
             toolsControl(axis: layout.axis)
                 .revealed(expanded, delay: delay(.tools))
                 .allowsHitTesting(expanded)
-                .offset(local(slots[.tools] ?? .zero))
+                .offset(slots[.tools] ?? .zero)
 
             colourButton
                 .revealed(expanded, delay: delay(.colour))
                 .allowsHitTesting(expanded)
-                .offset(local(slots[.colour] ?? .zero))
+                .offset(slots[.colour] ?? .zero)
 
             moreButton
                 .revealed(expanded, delay: delay(.more))
                 .allowsHitTesting(expanded)
-                .offset(local(slots[.more] ?? .zero))
+                .offset(slots[.more] ?? .zero)
 
             orbContent(size: size, layout: layout)
-                .offset(local(o))
+                .offset(o)
         }
-        .frame(width: rect.width, height: rect.height, alignment: .topLeading)
-        .clipShape(Capsule())
-        .glassEffect(
-            .regular.tint(state.selected == .eraser ? nil : state.colour.opacity(expanded ? 0.08 : 0.2)),
-            in: .capsule
-        )
-        .offset(x: rect.minX, y: rect.minY)
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        // Clip to the same animated rect as the glass: icons only show while the capsule
+        // is over them, so nothing can be left stranded outside it after a collapse.
+        .mask(alignment: .topLeading) {
+            Capsule()
+                .frame(width: rect.width, height: rect.height)
+                .offset(x: rect.minX, y: rect.minY)
+        }
     }
 
     private func orbContent(size: CGSize, layout: Layout) -> some View {
@@ -424,6 +444,8 @@ struct ToolPalette: View {
         }
     }
 
+    // MARK: - Settings panel
+
     private func panel(origin o: CGPoint, layout: Layout, size: CGSize, slots: [Slot: CGPoint]) -> some View {
         let colourSlot = slots[.colour] ?? .zero
         let colourRect = CGRect(x: colourSlot.x, y: colourSlot.y, width: Metrics.small, height: Metrics.small)
@@ -485,6 +507,8 @@ struct ToolPalette: View {
         }
         .buttonStyle(.plain)
     }
+
+    // MARK: - Layout maths
 
     private struct Layout {
         var axis: Axis
